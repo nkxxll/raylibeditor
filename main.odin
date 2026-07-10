@@ -3,6 +3,8 @@ package main
 import lua "vendor:lua/5.4"
 import "core:fmt"
 import "base:runtime"
+import "core:os"
+import "core:strings"
 
 lua_ctx: runtime.Context
 
@@ -34,13 +36,17 @@ main :: proc() {
 
 	lua.L_openlibs(L)
 
-	script : cstring = `print('hello world')
-	odin_print()
-	odin_print()
-	odin_print()
-	odin_print()`
+	data, err := os.read_entire_file("script.lua", context.allocator)
+	if err != nil {
+		fmt.println("Failed to read file")
+		return
+	}
+	defer delete(data)
 
-	if lua.L_dostring(L, script) != 0 {
+	script_text := string(data)
+	c_script := strings.clone_to_cstring(script_text)
+
+	if lua.L_dostring(L, c_script) != 0 {
 		fmt.println("lua error:", lua.tostring(L, -1))
 	}
 }
