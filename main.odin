@@ -2,52 +2,61 @@ package main
 
 import lua "vendor:lua/5.4"
 import "core:fmt"
-import "base:runtime"
 import "core:os"
-import "core:strings"
+import "core:sys/linux"
+import "core:time"
+import "relua"
 
-lua_ctx: runtime.Context
-
-User_Data :: struct {
-	counter: int
+Event_Loop_Context :: struct {
+	L: ^lua.State
 }
+start_event_loop :: proc(event_loop_context: ^Event_Loop_Context) {
+	when ODIN_OS == .Linux {
+		fd, errno := linux.inotify_init()
+		if errno != .NONE {
+			panic("setting up inotify_init1 did not work")
+		}
+		defer linux.close(fd)
 
-lua_my_func :: proc "c" (L: ^lua.State) -> i32 {
-	context = lua_ctx
-	user_data := cast(^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
-	user_data.counter += 1;
+		wd, watch_errno := linux.inotify_add_watch(
+			fd,
+			"script.lua",
+			linux.Inotify_Event_Mask{.MODIFY},
+		)
+		if watch_errno != .NONE || wd < 0 {
+			panic("setting up inotify watch for script.lua did not work")
+		}
 
-	fmt.println("hello odin", user_data.counter)
-	return 0
+		relua.eval_script(event_loop_context.L, "script.lua")
+
+		event_buf: [4096]u8
+		for {
+			fmt.println("event loop start")
+			// this constantly reads this is not good we need poll here
+			n, err := linux.read(fd, event_buf[:])
+			if n > 0 {
+				fmt.println("script.lua changed; re-evaluating")
+				relua.eval_script(event_loop_context.L, "script.lua")
+			} else if err != nil {
+				fmt.println("inotify read error:", err)
+			}
+			fmt.println("event loop end")
+		}
+	} else when ODIN_OS == .Darwin {
+		#assert(false, "have to implement darwin next")
+	} else when ODIN_OS == .Windows {
+		#assert(false, "what are you doing with your life")
+	}
 }
 
 main :: proc() {
-	L := lua.L_newstate()
-	if L == nil {
-		panic("ah no lua state")
-	}
+	L := relua.state_init()
 	defer lua.close(L)
 
-	user_data := cast(^User_Data)lua.newuserdata(L, size_of(User_Data))
-	user_data^ = User_Data{ 0 }
-
-	lua.pushcclosure(L, lua_my_func, 1)
-	lua.setglobal(L, "odin_print")
-
-	lua.L_openlibs(L)
-
-	data, err := os.read_entire_file("script.lua", context.allocator)
-	if err != nil {
-		fmt.println("Failed to read file")
-		return
+	event_loop_context := Event_Loop_Context { 
+		L = L
 	}
-	defer delete(data)
 
-	script_text := string(data)
-	c_script := strings.clone_to_cstring(script_text)
-
-	if lua.L_dostring(L, c_script) != 0 {
-		fmt.println("lua error:", lua.tostring(L, -1))
-	}
+	start_event_loop(&event_loop_context)
 }
 // vim: set ts=4:
