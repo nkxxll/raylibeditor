@@ -5,21 +5,25 @@ import "base:runtime"
 import "core:strings"
 import "core:fmt"
 import "core:os"
+import "core:sync"
+import "../restate"
 
-User_Data :: struct {
-	counter: int
-}
+/*
+   this is the user data that is in odin state while the scripts are running
+   this is the basis on which raylib data is sent
+*/
+User_Data :: restate.User_Data_State
 
 lua_ctx: runtime.Context
 
-state_init :: proc() -> ^lua.State {
+state_init :: proc(user_data: ^User_Data) -> ^lua.State {
 	L := lua.L_newstate()
 	if L == nil {
 		panic("ah no lua state")
 	}
 
-	user_data := cast(^User_Data)lua.newuserdata(L, size_of(^User_Data))
-	user_data^ = User_Data{ 0 }
+	user_data_upvalue := cast(^^User_Data)lua.newuserdata(L, size_of(^User_Data))
+	user_data_upvalue^ = user_data
 
 	// @todo we can modularize this so that we can push automatically a
 	// centrally defined list of functions with names to the lua functions
@@ -32,8 +36,15 @@ state_init :: proc() -> ^lua.State {
 
 lua_my_func :: proc "c" (L: ^lua.State) -> i32 {
 	context = lua_ctx
-	user_data := cast(^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
-	user_data.counter += 1;
+	user_data_upvalue := cast(^^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
+	user_data := user_data_upvalue^
+
+	if user_data.mutex != nil {
+		sync.mutex_lock(user_data.mutex)
+		defer sync.mutex_unlock(user_data.mutex)
+	}
+
+	user_data.counter += 1
 
 	fmt.println("hello odin", user_data.counter)
 	return 0
@@ -55,4 +66,3 @@ eval_script :: proc(L: ^lua.State, path: string) {
 		lua.pop(L, 1)
 	}
 }
-

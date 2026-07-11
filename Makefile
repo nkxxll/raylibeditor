@@ -5,7 +5,10 @@ PKGS := lua5.4
 TARGET := app
 SRC := .
 
-.PHONY: build run clean
+.PHONY: build run clean check
+
+check:
+	odin check .
 
 build:
 	$(ODIN) build $(SRC) -out:$(TARGET) \

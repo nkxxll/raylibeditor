@@ -9,6 +9,10 @@ import "core:sys/kqueue"
 import "core:sys/posix"
 import "core:time"
 import "relua"
+import "restate"
+import "reray"
+import "core:sync"
+import "core:thread"
 
 Event_Loop_Context :: struct {
 	L: ^lua.State
@@ -19,7 +23,7 @@ start_event_loop :: proc(event_loop_context: ^Event_Loop_Context) {
 		if errno != .NONE {
 			panic("setting up inotify_init1 did not work")
 		}
-		defer posix.close(fd)
+		defer posix.close(posix.FD(fd))
 
 		wd, watch_errno := linux.inotify_add_watch(
 			fd,
@@ -37,12 +41,12 @@ start_event_loop :: proc(event_loop_context: ^Event_Loop_Context) {
 		for {
 			fmt.println("event loop start")
 			// this constantly reads this is not good we need poll here
-			n := posix.read(fd, raw_data(event_buf[:]), EVENT_BUF_SIZE)
+			n := posix.read(posix.FD(fd), raw_data(event_buf[:]), EVENT_BUF_SIZE)
 			if n > 0 {
 				fmt.println("script.lua changed; re-evaluating")
 				relua.eval_script(event_loop_context.L, "script.lua")
 			} else {
-				fmt.println("inotify read error:", err)
+				fmt.println("inotify read error")
 			}
 			fmt.println("event loop end")
 		}
@@ -108,7 +112,17 @@ main :: proc() {
 		}
 	}
 
-	L := relua.state_init()
+	user_data_mutex: sync.Mutex
+	user_data_state := restate.User_Data_State {
+		counter = 0,
+		mutex = &user_data_mutex,
+	}
+
+	ray_state := reray.init(800, 800, &user_data_state)
+	_ = thread.create_and_start_with_data(&ray_state, reray.run)
+
+
+	L := relua.state_init(&user_data_state)
 	defer lua.close(L)
 
 	event_loop_context := Event_Loop_Context { 
