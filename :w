@@ -1,0 +1,18 @@
+local some = "name"
+
+local function hello(name)
+	print("hello " .. name)
+end
+
+local function bye(name)
+	print("bye " .. name)
+end
+
+hello("tom")
+hello(some)
+
+bye(some)
+print("hello from script")
+print("hello")
+
+print_odin()

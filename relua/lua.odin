@@ -22,8 +22,7 @@ state_init :: proc(user_data: ^User_Data) -> ^lua.State {
 		panic("ah no lua state")
 	}
 
-	user_data_upvalue := cast(^^User_Data)lua.newuserdata(L, size_of(^User_Data))
-	user_data_upvalue^ = user_data
+	lua.pushlightuserdata(L, user_data)
 
 	// @todo we can modularize this so that we can push automatically a
 	// centrally defined list of functions with names to the lua functions
@@ -36,8 +35,7 @@ state_init :: proc(user_data: ^User_Data) -> ^lua.State {
 
 lua_my_func :: proc "c" (L: ^lua.State) -> i32 {
 	context = lua_ctx
-	user_data_upvalue := cast(^^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
-	user_data := user_data_upvalue^
+	user_data := cast(^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
 
 	user_data.counter += 1
 	chan.send(user_data.render_messages, restate.Update_Counter { counter = user_data.counter })
