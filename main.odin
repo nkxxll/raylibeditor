@@ -11,7 +11,7 @@ import "core:time"
 import "relua"
 import "restate"
 import "reray"
-import "core:sync"
+import "core:sync/chan"
 import "core:thread"
 
 Event_Loop_Context :: struct {
@@ -112,13 +112,18 @@ main :: proc() {
 		}
 	}
 
-	user_data_mutex: sync.Mutex
+	render_messages, channel_err := chan.create(restate.Rendering_Message_Channel, 64, context.allocator)
+	if channel_err != .None {
+		panic("failed to create render message channel")
+	}
+	defer chan.destroy(render_messages)
+
 	user_data_state := restate.User_Data_State {
 		counter = 0,
-		mutex = &user_data_mutex,
+		render_messages = render_messages,
 	}
 
-	ray_state := reray.init(800, 800, &user_data_state)
+	ray_state := reray.init(800, 800, render_messages)
 	_ = thread.create_and_start_with_data(&ray_state, reray.run)
 
 

@@ -5,7 +5,7 @@ import "base:runtime"
 import "core:strings"
 import "core:fmt"
 import "core:os"
-import "core:sync"
+import "core:sync/chan"
 import "../restate"
 
 /*
@@ -39,12 +39,8 @@ lua_my_func :: proc "c" (L: ^lua.State) -> i32 {
 	user_data_upvalue := cast(^^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
 	user_data := user_data_upvalue^
 
-	if user_data.mutex != nil {
-		sync.mutex_lock(user_data.mutex)
-		defer sync.mutex_unlock(user_data.mutex)
-	}
-
 	user_data.counter += 1
+	chan.send(user_data.render_messages, restate.Update_Counter { counter = user_data.counter })
 
 	fmt.println("hello odin", user_data.counter)
 	return 0

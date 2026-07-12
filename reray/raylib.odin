@@ -2,41 +2,42 @@ package reray
 
 import rl "vendor:raylib"
 import "core:fmt"
-import "core:sync"
+import "core:sync/chan"
 import "../restate"
 
 State :: restate.Rendering_State
 
-update_state_from_user_data :: proc(state: ^State) {
-	if state.user_data == nil || state.user_data.mutex == nil {
-		return
-	}
-
-	if sync.mutex_try_lock(state.user_data.mutex) {
-		state.time = state.user_data.counter
-		sync.mutex_unlock(state.user_data.mutex)
+handle_message :: proc(state: ^State, message: restate.Rendering_Message) {
+	switch msg in message {
+	case restate.Update_Counter:
+		state.counter = msg.counter
 	}
 }
 
-init :: proc(width: i32, height: i32, user_data: ^restate.User_Data_State) -> State {
+receive_messages :: proc(state: ^State) {
+	for message in chan.try_recv(state.render_messages) {
+		handle_message(state, message)
+	}
+}
+
+init :: proc(width: i32, height: i32, render_messages: restate.Rendering_Message_Channel) -> State {
 	return State {
-		time = 0,
+		counter = 0,
 		width = width,
 		height = height,
-		user_data = user_data,
+		render_messages = render_messages,
 	}
 }
 
 update :: proc(state: ^State) {
-	// receive
-	update_state_from_user_data(state)
+	receive_messages(state)
 	rl.DrawRectangleV(
 		{ cast(f32)state.width / 4, cast(f32)state.height / 4 },
 		{ 100, 100 },
 		rl.RED
 	)
 	rl.DrawText(
-		fmt.ctprintf("hello world %d", state.time),
+		fmt.ctprintf("hello world %d", state.counter),
 		state.width / 2,
 		state.height / 2,
 		10,

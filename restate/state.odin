@@ -1,15 +1,25 @@
 package restate
 
-import "core:sync"
+import "core:sync/chan"
+
+Rendering_Message_Channel :: chan.Chan(Rendering_Message)
+
+Update_Counter :: struct {
+	counter: int,
+}
+
+Rendering_Message :: union {
+	Update_Counter,
+}
 
 User_Data_State :: struct {
 	counter: int,
-	mutex: ^sync.Mutex,
+	render_messages: Rendering_Message_Channel,
 }
 
 Rendering_State :: struct {
-	time: int,
+	counter: int,
 	width: i32,
 	height: i32,
-	user_data: ^User_Data_State,
+	render_messages: Rendering_Message_Channel,
 }
