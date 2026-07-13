@@ -11,13 +11,15 @@ import "core:time"
 import "relua"
 import "restate"
 import "reray"
-import "core:sync/chan"
 import "core:thread"
 
 Event_Loop_Context :: struct {
 	L: ^lua.State
 }
-start_event_loop :: proc(event_loop_context: ^Event_Loop_Context) {
+
+start_event_loop :: proc(data: rawptr) {
+	event_loop_context := cast(^Event_Loop_Context)data
+
 	when ODIN_OS == .Linux {
 		fd, errno := linux.inotify_init()
 		if errno != .NONE {
@@ -112,20 +114,15 @@ main :: proc() {
 		}
 	}
 
-	render_messages, channel_err := chan.create(restate.Rendering_Message_Channel, 64, context.allocator)
-	if channel_err != .None {
-		panic("failed to create render message channel")
+	shared_render_state := restate.Shared_Render_State {
+		counter = 0,
 	}
-	defer chan.destroy(render_messages)
 
 	user_data_state := restate.User_Data_State {
-		counter = 0,
-		render_messages = render_messages,
+		render_state = &shared_render_state,
 	}
 
-	ray_state := reray.init(800, 800, render_messages)
-	_ = thread.create_and_start_with_data(&ray_state, reray.run)
-
+	ray_state := reray.init(800, 800, &shared_render_state)
 
 	L := relua.state_init(&user_data_state)
 	defer lua.close(L)
@@ -134,6 +131,7 @@ main :: proc() {
 		L = L
 	}
 
-	start_event_loop(&event_loop_context)
+	_ = thread.create_and_start_with_data(&event_loop_context, start_event_loop)
+	reray.run(&ray_state)
 }
 // vim: set ts=4:

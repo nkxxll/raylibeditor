@@ -2,42 +2,31 @@ package reray
 
 import rl "vendor:raylib"
 import "core:fmt"
-import "core:sync/chan"
+import "core:sync"
 import "../restate"
 
 State :: restate.Rendering_State
 
-handle_message :: proc(state: ^State, message: restate.Rendering_Message) {
-	switch msg in message {
-	case restate.Update_Counter:
-		state.counter = msg.counter
-	}
-}
-
-receive_messages :: proc(state: ^State) {
-	for message in chan.try_recv(state.render_messages) {
-		handle_message(state, message)
-	}
-}
-
-init :: proc(width: i32, height: i32, render_messages: restate.Rendering_Message_Channel) -> State {
+init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State) -> State {
 	return State {
-		counter = 0,
 		width = width,
 		height = height,
-		render_messages = render_messages,
+		render_state = render_state,
 	}
 }
 
 update :: proc(state: ^State) {
-	receive_messages(state)
+	sync.mutex_lock(&state.render_state.mutex)
+	counter := state.render_state.counter
+	sync.mutex_unlock(&state.render_state.mutex)
+
 	rl.DrawRectangleV(
 		{ cast(f32)state.width / 4, cast(f32)state.height / 4 },
 		{ 100, 100 },
 		rl.RED
 	)
 	rl.DrawText(
-		fmt.ctprintf("hello world %d", state.counter),
+		fmt.ctprintf("hello world %d", counter),
 		state.width / 2,
 		state.height / 2,
 		10,
