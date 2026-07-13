@@ -26,22 +26,49 @@ state_init :: proc(user_data: ^User_Data) -> ^lua.State {
 
 	// @todo we can modularize this so that we can push automatically a
 	// centrally defined list of functions with names to the lua functions
-	lua.pushcclosure(L, lua_my_func, 1)
-	lua.setglobal(L, "odin_print")
+	lua.pushcclosure(L, update_state, 1)
+	lua.setglobal(L, "update_state")
 
 	lua.L_openlibs(L)
 	return L
 }
 
-lua_my_func :: proc "c" (L: ^lua.State) -> i32 {
+update_state :: proc "c" (L: ^lua.State) -> i32 {
 	context = lua_ctx
 	user_data := cast(^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
 
+	lua.L_checktype(L, 1, i32(lua.TTABLE));
+	table_index := lua.absindex(L, 1)
+
+	lua.pushnil(L)
+
+	lua.next(L, table_index)
+
+	key := lua.tostring(L, -2);
+
+
+	// int table_index = lua_upvalueindex(1);
+	//
+	//    luaL_checktype(L, table_index, LUA_TTABLE);
+	//
+	//    lua_pushnil(L);
+	//
+	//    while (lua_next(L, table_index) != 0) {
+	//        /* key is at -2, value is at -1 */
+	//
+	//        printf("key type: %s, value type: %s\n",
+	//               luaL_typename(L, -2),
+	//               luaL_typename(L, -1));
+	//
+	//        lua_pop(L, 1); /* Pop value, retain key. */
+	//    }
+	//
+	//    return 0;
+
 	sync.mutex_lock(&user_data.render_state.mutex)
-	user_data.render_state.counter += 1
+	user_data.render_state.slides = string(key)
 	sync.mutex_unlock(&user_data.render_state.mutex)
 
-	fmt.println("hello odin", user_data.render_state.counter)
 	return 0
 }
 

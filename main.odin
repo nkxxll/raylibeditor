@@ -97,6 +97,15 @@ start_event_loop :: proc(data: rawptr) {
 	}
 }
 
+DEFAULT_ARENA_SIZE :: 16384
+
+init_state_allocator :: proc() -> mem.Allocator {
+	arena := mem.Arena{}
+	data := make([]byte, DEFAULT_ARENA_SIZE)
+	mem.arena_init(&arena, data)
+	return mem.arena_allocator(&arena)
+}
+
 main :: proc() {
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -114,8 +123,13 @@ main :: proc() {
 		}
 	}
 
+	// this gets destroyed after the program exits if the data is not enough
+	// then I will know that I have a problem here hopefully
+	state_allocator := init_state_allocator()
+
 	shared_render_state := restate.Shared_Render_State {
-		counter = 0,
+		allocator = state_allocator,
+		slides = "",
 	}
 
 	user_data_state := restate.User_Data_State {

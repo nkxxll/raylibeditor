@@ -4,21 +4,22 @@ import rl "vendor:raylib"
 import "core:fmt"
 import "core:sync"
 import "../restate"
+import "core:strings"
 
-State :: restate.Rendering_State
-
-init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State) -> State {
-	return State {
+init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State) -> restate.Rendering_State {
+	return restate.Rendering_State {
 		width = width,
 		height = height,
 		render_state = render_state,
 	}
 }
 
-update :: proc(state: ^State) {
-	sync.mutex_lock(&state.render_state.mutex)
-	counter := state.render_state.counter
-	sync.mutex_unlock(&state.render_state.mutex)
+update :: proc(state: ^restate.Rendering_State) {
+	text : string
+	if sync.mutex_try_lock(&state.render_state.mutex) {
+		text = state.render_state.slides
+		sync.mutex_unlock(&state.render_state.mutex)
+	}
 
 	rl.DrawRectangleV(
 		{ cast(f32)state.width / 4, cast(f32)state.height / 4 },
@@ -26,7 +27,7 @@ update :: proc(state: ^State) {
 		rl.RED
 	)
 	rl.DrawText(
-		fmt.ctprintf("hello world %d", counter),
+		strings.clone_to_cstring(text, context.temp_allocator),
 		state.width / 2,
 		state.height / 2,
 		10,
@@ -35,7 +36,7 @@ update :: proc(state: ^State) {
 }
 
 run :: proc(state: rawptr) {
-	s := cast(^State)state
+	s := cast(^restate.Rendering_State)state
 	rl.SetConfigFlags({ .WINDOW_RESIZABLE });
 	rl.InitWindow(s.width, s.height, "raylib editor")
 	rl.SetTargetFPS(60)
