@@ -33,6 +33,69 @@ state_init :: proc(user_data: ^User_Data) -> ^lua.State {
 	return L
 }
 
+handle_text_slide_item :: proc(user_data: ^User_Data, L: ^lua.State, absolute_item_index: i32) {
+	panic("this is still a todo")
+}
+
+// this reads the type and dispatches to the specific item handlers	
+handle_slide_item :: proc(user_data: ^User_Data, L: ^lua.State, index: i32) {
+	// { type = "<some type>", value = "<value>", ..args = special optional
+	// keys for this item type
+
+	absolute_item_index := lua.absindex(L, index);
+
+	lua.getfield(L, absolute_item_index, "type");
+	type := lua.L_checkstring(L, -1);
+	lua.pop(L, 1);
+
+	switch type {
+	case "text":
+		handle_text_slide_item(user_data, L, absolute_item_index)
+	case:
+		lua.L_error(L, "unknown slide item type %s", type)
+	}
+
+}
+
+handle_index :: proc(user_data: ^User_Data, L: ^lua.State, index: i32) {
+	list_index := lua.absindex(L, index)
+
+	lua.pushnil(L)
+
+	length := lua.rawlen(L, list_index)
+
+	for i in 0..<length {
+
+		lua.geti(L, list_index, lua.Integer(i));
+
+		handle_slide_item(user_data, L, -1)
+
+		lua.pop(L, 1) /* Pop value, retain key. */
+
+	}
+}
+
+handle_value :: proc(user_data: ^User_Data, L: ^lua.State, key: cstring, index: i32) {
+	switch key {
+	case "index":
+		if (lua.istable(L, index)) {
+			handle_index(user_data, L, index)
+		} else {
+			lua.L_error(
+				L,
+				"configuration keys type is not the right one, got %s",
+				lua.L_typename(L, -1),
+			)
+		}
+	case:
+			lua.L_error(
+				L,
+				"configuration keys unknown, got %s",
+				key,
+			)
+	}
+}
+
 update_state :: proc "c" (L: ^lua.State) -> i32 {
 	context = lua_ctx
 	user_data := cast(^User_Data)lua.touserdata(L, lua.REGISTRYINDEX - 1)
@@ -42,32 +105,22 @@ update_state :: proc "c" (L: ^lua.State) -> i32 {
 
 	lua.pushnil(L)
 
-	lua.next(L, table_index)
+	for lua.next(L, table_index) != 0 {
 
-	key := lua.tostring(L, -2);
+		key := lua.tostring(L, -2)
+		if (lua.type(L, -2) != lua.TSTRING) {
+			lua.L_error(
+				L,
+				"configuration keys must be strings, got %s",
+				lua.L_typename(L, -2),
+			)
+		}
 
+		handle_value(user_data, L, key, -1)
 
-	// int table_index = lua_upvalueindex(1);
-	//
-	//    luaL_checktype(L, table_index, LUA_TTABLE);
-	//
-	//    lua_pushnil(L);
-	//
-	//    while (lua_next(L, table_index) != 0) {
-	//        /* key is at -2, value is at -1 */
-	//
-	//        printf("key type: %s, value type: %s\n",
-	//               luaL_typename(L, -2),
-	//               luaL_typename(L, -1));
-	//
-	//        lua_pop(L, 1); /* Pop value, retain key. */
-	//    }
-	//
-	//    return 0;
+		lua.pop(L, 1) /* Pop value, retain key. */
 
-	sync.mutex_lock(&user_data.render_state.mutex)
-	user_data.render_state.slides = string(key)
-	sync.mutex_unlock(&user_data.render_state.mutex)
+	}
 
 	return 0
 }
