@@ -42,6 +42,7 @@ Style :: struct {
 	title_font_size:  i32,
 	text_font_size:   i32,
 	text_spacing:     i32,
+	text_margin:      i32,
 }
 
 default_style :: proc() -> Style {
@@ -54,6 +55,7 @@ default_style :: proc() -> Style {
 		title_font_size = 24,
 		text_font_size = 20,
 		text_spacing = 28,
+		text_margin = 96,
 	}
 }
 

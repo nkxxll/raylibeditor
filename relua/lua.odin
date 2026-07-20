@@ -30,7 +30,7 @@ state_init :: proc(user_data: ^User_Data) -> ^lua.State {
 	// @todo we can modularize this so that we can push automatically a
 	// centrally defined list of functions with names to the lua functions
 	lua.pushcclosure(L, update_state, 1)
-	lua.setglobal(L, "update_state")
+	lua.setglobal(L, "raylibeditor_update_state")
 
 	lua.L_openlibs(L)
 	return L
@@ -172,12 +172,13 @@ handle_style :: proc(L: ^lua.State, index: i32) -> restate.Style {
 	style.text_position = handle_point(L, -1, style.text_position)
 	lua.pop(L, 1)
 
-	for key in 0..<3 {
+	for key in 0..<4 {
 		field: cstring
 		switch key {
 		case 0: field = "title_font_size"
 		case 1: field = "text_font_size"
 		case 2: field = "text_spacing"
+		case 3: field = "text_margin"
 		}
 		lua.getfield(L, style_index, field)
 		if !lua.isnil(L, -1) {
@@ -189,6 +190,7 @@ handle_style :: proc(L: ^lua.State, index: i32) -> restate.Style {
 			case 0: style.title_font_size = i32(value)
 			case 1: style.text_font_size = i32(value)
 			case 2: style.text_spacing = i32(value)
+			case 3: style.text_margin = i32(value)
 			}
 		}
 		lua.pop(L, 1)

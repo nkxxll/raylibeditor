@@ -52,6 +52,48 @@ make_render_slide :: proc(slide: restate.Slide, allocator := context.temp_alloca
 	}
 }
 
+measure_text :: proc(text: string, font_size: i32) -> i32 {
+	return rl.MeasureText(strings.clone_to_cstring(text, context.temp_allocator), font_size)
+}
+
+draw_text_boxed :: proc(text: string, bounds: rl.Rectangle, font_size: i32, spacing: i32, color: rl.Color, allocator := context.temp_allocator) {
+	max_width := i32(bounds.width)
+	line_start := 0
+	line_end := 0
+	y := i32(bounds.y)
+	for line_end <= len(text) {
+		if line_end == len(text) || text[line_end] == '\n' {
+			line := text[line_start:line_end]
+			c_line := strings.clone_to_cstring(line, context.temp_allocator)
+			rl.DrawText(c_line, i32(bounds.x) + (max_width - rl.MeasureText(c_line, font_size)) / 2, y, font_size, color)
+			y += spacing
+			line_start = line_end + 1
+			line_end = line_start
+			continue
+		}
+
+		word_end := line_end
+		for word_end < len(text) && text[word_end] != ' ' && text[word_end] != '\t' && text[word_end] != '\n' {
+			word_end += 1
+		}
+		candidate := text[line_start:word_end]
+		if line_end != line_start && measure_text(candidate, font_size) > max_width {
+			line := text[line_start:line_end]
+			c_line := strings.clone_to_cstring(line, context.temp_allocator)
+			rl.DrawText(c_line, i32(bounds.x) + (max_width - rl.MeasureText(c_line, font_size)) / 2, y, font_size, color)
+			y += spacing
+			line_start = line_end + 1
+		}
+		line_end = word_end
+		if line_end < len(text) && (text[line_end] == ' ' || text[line_end] == '\t') {
+			line_end += 1
+		}
+		if y >= i32(bounds.y + bounds.height) {
+			break
+		}
+	}
+}
+
 init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State) -> restate.Rendering_State {
 	return restate.Rendering_State {
 		width = width,
@@ -87,26 +129,27 @@ update :: proc(state: ^restate.Rendering_State) {
 		}
 
 		slide := slides[current_slide]
+		title := strings.clone_to_cstring(slide.title, context.temp_allocator)
 		rl.DrawText(
-			strings.clone_to_cstring(slide.title, context.temp_allocator),
-			style.title_position.x,
-			style.title_position.y,
+			title,
+			(state.width - rl.MeasureText(title, style.title_font_size)) / 2,
+			style.text_margin,
 			style.title_font_size,
 			to_ray_color(style.title_color),
 		)
 
-		y := style.text_position.y
+		max_width := state.width - style.text_margin * 2
+		text_bounds := rl.Rectangle {
+			x = f32(style.text_margin),
+			y = f32(style.text_margin * 2),
+			width = f32(max_width),
+			height = f32(state.height - style.text_margin * 3),
+		}
 		for item in slide.items {
 			switch value in item {
 			case Render_Text_Item:
-				rl.DrawText(
-					strings.clone_to_cstring(value.text, context.temp_allocator),
-					style.text_position.x,
-					y,
-					style.text_font_size,
-					to_ray_color(style.text_color),
-				)
-				y += style.text_spacing
+				draw_text_boxed(value.text, text_bounds, style.text_font_size, style.text_spacing, to_ray_color(style.text_color))
+				text_bounds.y += f32(style.text_spacing)
 			}
 		}
 	}
