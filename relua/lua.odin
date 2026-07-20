@@ -17,6 +17,8 @@ User_Data :: restate.User_Data_State
 lua_ctx: runtime.Context
 
 state_init :: proc(user_data: ^User_Data) -> ^lua.State {
+	lua_ctx = context
+
 	L := lua.L_newstate()
 	if L == nil {
 		panic("ah no lua state")
@@ -33,12 +35,16 @@ state_init :: proc(user_data: ^User_Data) -> ^lua.State {
 	return L
 }
 
-handle_text_slide_item :: proc(user_data: ^User_Data, L: ^lua.State, absolute_item_index: i32) {
-	panic("this is still a todo")
+handle_text_slide_item :: proc(L: ^lua.State, absolute_item_index: i32, allocator := context.allocator) -> restate.Text_Item {
+	lua.getfield(L, absolute_item_index, "value")
+	text := lua.L_checkstring(L, -1)
+	lua.pop(L, 1)
+
+	return restate.Text_Item { text = strings.clone(string(text), allocator) }
 }
 
 // this reads the type and dispatches to the specific item handlers	
-handle_slide_item :: proc(user_data: ^User_Data, L: ^lua.State, index: i32) {
+handle_slide_item :: proc(L: ^lua.State, index: i32, allocator := context.allocator) -> restate.Slide_Item {
 	// { type = "<some type>", value = "<value>", ..args = special optional
 	// keys for this item type
 
@@ -50,29 +56,60 @@ handle_slide_item :: proc(user_data: ^User_Data, L: ^lua.State, index: i32) {
 
 	switch type {
 	case "text":
-		handle_text_slide_item(user_data, L, absolute_item_index)
+		ti := handle_text_slide_item(L, absolute_item_index, allocator)
+		return restate.Slide_Item(ti)
 	case:
 		lua.L_error(L, "unknown slide item type %s", type)
 	}
 
+	// todo might be better to use err here and dual return
+	panic("this cannot happen actually")
+}
+
+handle_slide :: proc(L: ^lua.State, index: i32, allocator := context.allocator) -> restate.Slide {
+	slide_index := lua.absindex(L, index)
+
+	lua.getfield(L, slide_index, "title")
+	title := lua.L_checkstring(L, -1)
+	title_clone := strings.clone(string(title), allocator)
+	lua.pop(L, 1)
+
+	lua.getfield(L, slide_index, "slide_items")
+	lua.L_checktype(L, -1, i32(lua.TTABLE))
+	slide_items_index := lua.absindex(L, -1)
+	items := make([dynamic]restate.Slide_Item, 0, int(lua.rawlen(L, slide_items_index)), allocator)
+
+	for i in 1..=lua.rawlen(L, slide_items_index) {
+		lua.geti(L, slide_items_index, lua.Integer(i))
+		append(&items, handle_slide_item(L, -1, allocator))
+		lua.pop(L, 1)
+	}
+	lua.pop(L, 1)
+
+	return restate.Slide {
+		title = title_clone,
+		items = items,
+	}
 }
 
 handle_index :: proc(user_data: ^User_Data, L: ^lua.State, index: i32) {
 	list_index := lua.absindex(L, index)
+	allocator := user_data.render_state.allocator
+	slides := make([dynamic]restate.Slide, 0, 16, allocator)
+	
+	for i in 1..=lua.rawlen(L, list_index) {
+		lua.geti(L, list_index, lua.Integer(i))
+		if !lua.istable(L, -1) {
+			lua.L_error(L, "slide values must be tables, got %s", lua.L_typename(L, -1))
+		}
 
-	lua.pushnil(L)
-
-	length := lua.rawlen(L, list_index)
-
-	for i in 0..<length {
-
-		lua.geti(L, list_index, lua.Integer(i));
-
-		handle_slide_item(user_data, L, -1)
-
-		lua.pop(L, 1) /* Pop value, retain key. */
-
+		append(&slides, handle_slide(L, -1, allocator))
+		lua.pop(L, 1)
 	}
+
+	sync.mutex_lock(&user_data.render_state.mutex)
+	user_data.render_state.slides = slides
+	sync.mutex_unlock(&user_data.render_state.mutex)
 }
 
 handle_value :: proc(user_data: ^User_Data, L: ^lua.State, key: cstring, index: i32) {
@@ -88,11 +125,7 @@ handle_value :: proc(user_data: ^User_Data, L: ^lua.State, key: cstring, index: 
 			)
 		}
 	case:
-			lua.L_error(
-				L,
-				"configuration keys unknown, got %s",
-				key,
-			)
+		// Future top-level sections such as config can be added without breaking slide parsing.
 	}
 }
 

@@ -1,10 +1,52 @@
 package reray
 
 import rl "vendor:raylib"
-import "core:fmt"
 import "core:sync"
 import "../restate"
 import "core:strings"
+
+@(private)
+current_slide : int = 0
+
+Render_Text_Item :: struct {
+	text: string
+}
+
+Render_Slide_Item :: union {
+	Render_Text_Item
+}
+
+Render_Slide :: struct {
+	title: string,
+	items: [dynamic]Render_Slide_Item
+}
+
+make_render_text_item :: proc(text: string, allocator := context.temp_allocator) -> Render_Slide_Item {
+	return Render_Slide_Item(Render_Text_Item {
+		text = strings.clone(text, allocator),
+	})
+}
+
+make_render_slide_item :: proc(item: restate.Slide_Item, allocator := context.temp_allocator) -> Render_Slide_Item {
+	switch value in item {
+	case restate.Text_Item:
+		return make_render_text_item(value.text, allocator)
+	}
+
+	panic("unknown slide item type")
+}
+
+make_render_slide :: proc(slide: restate.Slide, allocator := context.temp_allocator) -> Render_Slide {
+	items := make([dynamic]Render_Slide_Item, 0, len(slide.items), allocator)
+	for item in slide.items {
+		append(&items, make_render_slide_item(item, allocator))
+	}
+
+	return Render_Slide {
+		title = strings.clone(slide.title, allocator),
+		items = items,
+	}
+}
 
 init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State) -> restate.Rendering_State {
 	return restate.Rendering_State {
@@ -15,9 +57,11 @@ init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State
 }
 
 update :: proc(state: ^restate.Rendering_State) {
-	text : string
+	slides := make([dynamic]Render_Slide, 0, 16, context.temp_allocator)
 	if sync.mutex_try_lock(&state.render_state.mutex) {
-		text = state.render_state.slides
+		for slide in state.render_state.slides {
+			append(&slides, make_render_slide(slide, context.temp_allocator))
+		}
 		sync.mutex_unlock(&state.render_state.mutex)
 	}
 
@@ -26,13 +70,46 @@ update :: proc(state: ^restate.Rendering_State) {
 		{ 100, 100 },
 		rl.RED
 	)
-	rl.DrawText(
-		strings.clone_to_cstring(text, context.temp_allocator),
-		state.width / 2,
-		state.height / 2,
-		10,
-		rl.BLUE
-	)
+	if len(slides) > 0 {
+		if rl.IsKeyPressed(.SPACE) {
+			shift_is_down := rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT)
+			if shift_is_down {
+				if current_slide > 0 {
+					current_slide -= 1
+				}
+			} else if current_slide + 1 < len(slides) {
+				current_slide += 1
+			}
+		}
+
+		if current_slide >= len(slides) {
+			current_slide = len(slides) - 1
+		}
+
+		slide := slides[current_slide]
+		rl.DrawText(
+			strings.clone_to_cstring(slide.title, context.temp_allocator),
+			40,
+			40,
+			24,
+			rl.BLUE,
+		)
+
+		y := i32(90)
+		for item in slide.items {
+			switch value in item {
+			case Render_Text_Item:
+				rl.DrawText(
+					strings.clone_to_cstring(value.text, context.temp_allocator),
+					40,
+					y,
+					20,
+					rl.BLACK,
+				)
+				y += 28
+			}
+		}
+	}
 }
 
 run :: proc(state: rawptr) {

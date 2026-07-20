@@ -99,13 +99,6 @@ start_event_loop :: proc(data: rawptr) {
 
 DEFAULT_ARENA_SIZE :: 16384
 
-init_state_allocator :: proc() -> mem.Allocator {
-	arena := mem.Arena{}
-	data := make([]byte, DEFAULT_ARENA_SIZE)
-	mem.arena_init(&arena, data)
-	return mem.arena_allocator(&arena)
-}
-
 main :: proc() {
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -123,13 +116,16 @@ main :: proc() {
 		}
 	}
 
-	// this gets destroyed after the program exits if the data is not enough
-	// then I will know that I have a problem here hopefully
-	state_allocator := init_state_allocator()
+	// Keep the arena itself alive for as long as anything allocated from it exists.
+	state_arena: mem.Arena
+	state_data := make([]byte, DEFAULT_ARENA_SIZE)
+	defer delete(state_data)
+	mem.arena_init(&state_arena, state_data)
+	state_allocator := mem.arena_allocator(&state_arena)
 
 	shared_render_state := restate.Shared_Render_State {
 		allocator = state_allocator,
-		slides = "",
+		slides = make([dynamic]restate.Slide, 0, 16, state_allocator),
 	}
 
 	user_data_state := restate.User_Data_State {
