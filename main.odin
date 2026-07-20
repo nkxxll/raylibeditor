@@ -44,7 +44,6 @@ start_event_loop :: proc(data: rawptr) {
 		for {
 			fmt.println("event loop start")
 			// this constantly reads this is not good we need poll here
-			free_all(event_loop_context.slide_state.render_state.allocator)
 			n := posix.read(posix.FD(fd), raw_data(event_buf[:]), EVENT_BUF_SIZE)
 			if n > 0 {
 				fmt.println("script.lua changed; re-evaluating")
@@ -132,6 +131,7 @@ main :: proc() {
 	shared_render_state := restate.Shared_Render_State {
 		allocator = state_allocator,
 		slides = make([dynamic]restate.Slide, 0, 16, state_allocator),
+		style = restate.default_style(),
 	}
 
 	user_data_state := restate.User_Data_State {

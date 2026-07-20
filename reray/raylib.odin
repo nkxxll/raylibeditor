@@ -21,6 +21,10 @@ Render_Slide :: struct {
 	items: [dynamic]Render_Slide_Item
 }
 
+to_ray_color :: proc(color: restate.Color) -> rl.Color {
+	return rl.Color{color.r, color.g, color.b, color.a}
+}
+
 make_render_text_item :: proc(text: string, allocator := context.temp_allocator) -> Render_Slide_Item {
 	return Render_Slide_Item(Render_Text_Item {
 		text = strings.clone(text, allocator),
@@ -58,18 +62,14 @@ init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State
 
 update :: proc(state: ^restate.Rendering_State) {
 	slides := make([dynamic]Render_Slide, 0, 16, context.temp_allocator)
-	if sync.mutex_try_lock(&state.render_state.mutex) {
-		for slide in state.render_state.slides {
-			append(&slides, make_render_slide(slide, context.temp_allocator))
-		}
-		sync.mutex_unlock(&state.render_state.mutex)
+	sync.mutex_lock(&state.render_state.mutex)
+	style := state.render_state.style
+	for slide in state.render_state.slides {
+		append(&slides, make_render_slide(slide, context.temp_allocator))
 	}
+	sync.mutex_unlock(&state.render_state.mutex)
 
-	rl.DrawRectangleV(
-		{ cast(f32)state.width / 4, cast(f32)state.height / 4 },
-		{ 100, 100 },
-		rl.RED
-	)
+	rl.ClearBackground(to_ray_color(style.background))
 	if len(slides) > 0 {
 		if rl.IsKeyPressed(.SPACE) {
 			shift_is_down := rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT)
@@ -89,24 +89,24 @@ update :: proc(state: ^restate.Rendering_State) {
 		slide := slides[current_slide]
 		rl.DrawText(
 			strings.clone_to_cstring(slide.title, context.temp_allocator),
-			40,
-			40,
-			24,
-			rl.BLUE,
+			style.title_position.x,
+			style.title_position.y,
+			style.title_font_size,
+			to_ray_color(style.title_color),
 		)
 
-		y := i32(90)
+		y := style.text_position.y
 		for item in slide.items {
 			switch value in item {
 			case Render_Text_Item:
 				rl.DrawText(
 					strings.clone_to_cstring(value.text, context.temp_allocator),
-					40,
+					style.text_position.x,
 					y,
-					20,
-					rl.BLACK,
+					style.text_font_size,
+					to_ray_color(style.text_color),
 				)
-				y += 28
+				y += style.text_spacing
 			}
 		}
 	}

@@ -6,6 +6,7 @@ import "core:strings"
 import "core:fmt"
 import "core:os"
 import "core:sync"
+import "core:mem"
 import "../restate"
 
 /*
@@ -92,9 +93,118 @@ handle_slide :: proc(L: ^lua.State, index: i32, allocator := context.allocator) 
 	}
 }
 
-handle_index :: proc(user_data: ^User_Data, L: ^lua.State, index: i32) {
+handle_color :: proc(L: ^lua.State, index: i32, fallback: restate.Color) -> restate.Color {
+	if lua.isnil(L, index) {
+		return fallback
+	}
+	lua.L_checktype(L, index, i32(lua.TTABLE))
+	color := fallback
+	color_index := lua.absindex(L, index)
+	for key in 0..<4 {
+		component: cstring
+		switch key {
+		case 0: component = "r"
+		case 1: component = "g"
+		case 2: component = "b"
+		case 3: component = "a"
+		}
+		lua.getfield(L, color_index, component)
+		if !lua.isnil(L, -1) {
+			value := lua.L_checkinteger(L, -1)
+			if value < 0 || value > 255 {
+				lua.L_error(L, "style color component %s must be between 0 and 255", component)
+			}
+			switch key {
+			case 0: color.r = u8(value)
+			case 1: color.g = u8(value)
+			case 2: color.b = u8(value)
+			case 3: color.a = u8(value)
+			}
+		}
+		lua.pop(L, 1)
+	}
+	return color
+}
+
+handle_point :: proc(L: ^lua.State, index: i32, fallback: restate.Point) -> restate.Point {
+	if lua.isnil(L, index) {
+		return fallback
+	}
+	lua.L_checktype(L, index, i32(lua.TTABLE))
+	point := fallback
+	point_index := lua.absindex(L, index)
+	for key in 0..<2 {
+		component: cstring
+		switch key {
+		case 0: component = "x"
+		case 1: component = "y"
+		}
+		lua.getfield(L, point_index, component)
+		if !lua.isnil(L, -1) {
+			switch key {
+			case 0: point.x = i32(lua.L_checkinteger(L, -1))
+			case 1: point.y = i32(lua.L_checkinteger(L, -1))
+			}
+		}
+		lua.pop(L, 1)
+	}
+	return point
+}
+
+handle_style :: proc(L: ^lua.State, index: i32) -> restate.Style {
+	lua.L_checktype(L, index, i32(lua.TTABLE))
+	style := restate.default_style()
+	style_index := lua.absindex(L, index)
+
+	lua.getfield(L, style_index, "background")
+	style.background = handle_color(L, -1, style.background)
+	lua.pop(L, 1)
+	lua.getfield(L, style_index, "title_color")
+	style.title_color = handle_color(L, -1, style.title_color)
+	lua.pop(L, 1)
+	lua.getfield(L, style_index, "text_color")
+	style.text_color = handle_color(L, -1, style.text_color)
+	lua.pop(L, 1)
+	lua.getfield(L, style_index, "title_position")
+	style.title_position = handle_point(L, -1, style.title_position)
+	lua.pop(L, 1)
+	lua.getfield(L, style_index, "text_position")
+	style.text_position = handle_point(L, -1, style.text_position)
+	lua.pop(L, 1)
+
+	for key in 0..<3 {
+		field: cstring
+		switch key {
+		case 0: field = "title_font_size"
+		case 1: field = "text_font_size"
+		case 2: field = "text_spacing"
+		}
+		lua.getfield(L, style_index, field)
+		if !lua.isnil(L, -1) {
+			value := lua.L_checkinteger(L, -1)
+			if value <= 0 {
+				lua.L_error(L, "style.%s must be greater than zero", field)
+			}
+			switch key {
+			case 0: style.title_font_size = i32(value)
+			case 1: style.text_font_size = i32(value)
+			case 2: style.text_spacing = i32(value)
+			}
+		}
+		lua.pop(L, 1)
+	}
+	return style
+}
+
+Parsed_State :: struct {
+	slides:    [dynamic]restate.Slide,
+	style:     restate.Style,
+	has_index: bool,
+	has_style: bool,
+}
+
+handle_index :: proc(L: ^lua.State, index: i32, allocator: mem.Allocator) -> [dynamic]restate.Slide {
 	list_index := lua.absindex(L, index)
-	allocator := user_data.render_state.allocator
 	slides := make([dynamic]restate.Slide, 0, 16, allocator)
 	
 	for i in 1..=lua.rawlen(L, list_index) {
@@ -107,16 +217,44 @@ handle_index :: proc(user_data: ^User_Data, L: ^lua.State, index: i32) {
 		lua.pop(L, 1)
 	}
 
-	sync.mutex_lock(&user_data.render_state.mutex)
-	user_data.render_state.slides = slides
-	sync.mutex_unlock(&user_data.render_state.mutex)
+	return slides
 }
 
-handle_value :: proc(user_data: ^User_Data, L: ^lua.State, key: cstring, index: i32) {
+clone_slide_item :: proc(item: restate.Slide_Item, allocator: mem.Allocator) -> restate.Slide_Item {
+	switch value in item {
+	case restate.Text_Item:
+		return restate.Slide_Item(restate.Text_Item {
+			text = strings.clone(value.text, allocator),
+		})
+	}
+	panic("unknown slide item type")
+}
+
+clone_slide :: proc(slide: restate.Slide, allocator: mem.Allocator) -> restate.Slide {
+	items := make([dynamic]restate.Slide_Item, 0, len(slide.items), allocator)
+	for item in slide.items {
+		append(&items, clone_slide_item(item, allocator))
+	}
+	return restate.Slide {
+		title = strings.clone(slide.title, allocator),
+		items = items,
+	}
+}
+
+clone_slides :: proc(slides: []restate.Slide, allocator: mem.Allocator) -> [dynamic]restate.Slide {
+	result := make([dynamic]restate.Slide, 0, len(slides), allocator)
+	for slide in slides {
+		append(&result, clone_slide(slide, allocator))
+	}
+	return result
+}
+
+handle_value :: proc(parsed: ^Parsed_State, L: ^lua.State, key: cstring, index: i32, allocator: mem.Allocator) {
 	switch key {
 	case "index":
 		if (lua.istable(L, index)) {
-			handle_index(user_data, L, index)
+			parsed.slides = handle_index(L, index, allocator)
+			parsed.has_index = true
 		} else {
 			lua.L_error(
 				L,
@@ -124,6 +262,9 @@ handle_value :: proc(user_data: ^User_Data, L: ^lua.State, key: cstring, index: 
 				lua.L_typename(L, -1),
 			)
 		}
+	case "style":
+		parsed.style = handle_style(L, index)
+		parsed.has_style = true
 	case:
 		// Future top-level sections such as config can be added without breaking slide parsing.
 	}
@@ -135,6 +276,11 @@ update_state :: proc "c" (L: ^lua.State) -> i32 {
 
 	lua.L_checktype(L, 1, i32(lua.TTABLE));
 	table_index := lua.absindex(L, 1)
+	// Keep all allocations made while parsing separate from the published
+	// document. This memory is discarded on the next update, including after
+	// a Lua error, without affecting the last valid render state.
+	free_all(context.temp_allocator)
+	parsed := Parsed_State { style = restate.default_style() }
 
 	lua.pushnil(L)
 
@@ -149,11 +295,27 @@ update_state :: proc "c" (L: ^lua.State) -> i32 {
 			)
 		}
 
-		handle_value(user_data, L, key, -1)
+		handle_value(&parsed, L, key, -1, context.temp_allocator)
 
 		lua.pop(L, 1) /* Pop value, retain key. */
 
 	}
+
+	// The Lua table has been fully parsed and validated. Clone the temporary
+	// document before publishing it, then swap all requested fields together.
+	allocator := user_data.render_state.allocator
+	slides: [dynamic]restate.Slide
+	if parsed.has_index {
+		slides = clone_slides(parsed.slides[:], allocator)
+	}
+	sync.mutex_lock(&user_data.render_state.mutex)
+	if parsed.has_index {
+		user_data.render_state.slides = slides
+	}
+	if parsed.has_style {
+		user_data.render_state.style = parsed.style
+	}
+	sync.mutex_unlock(&user_data.render_state.mutex)
 
 	return 0
 }
