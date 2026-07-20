@@ -8,7 +8,7 @@ Shared_Render_State :: struct {
 	mutex:     sync.Mutex,
 	slides:    [dynamic]Slide,
 	style:     Style,
-	allocator: mem.Allocator,
+	arena:     ^mem.Arena,
 }
 
 User_Data_State :: struct {
@@ -22,7 +22,15 @@ Rendering_State :: struct {
 }
 
 Text_Item :: struct {
-	text: string
+	text:      string,
+	style:     Style,
+	overrides: Text_Style_Overrides,
+}
+
+Text_Alignment :: enum {
+	LEFT,
+	CENTER,
+	RIGHT,
 }
 
 Color :: struct {
@@ -43,19 +51,29 @@ Style :: struct {
 	text_font_size:   i32,
 	text_spacing:     i32,
 	text_margin:      i32,
+	text_alignment:   Text_Alignment,
+}
+
+Text_Style_Overrides :: struct {
+	text_color:     bool,
+	text_font_size: bool,
+	text_spacing:   bool,
+	text_margin:    bool,
+	text_alignment: bool,
 }
 
 default_style :: proc() -> Style {
 	return Style {
-		background = {245, 245, 245, 255},
-		title_color = {35, 75, 125, 255},
-		text_color = {20, 20, 20, 255},
+		background = {20, 22, 27, 255},
+		title_color = {166, 219, 255, 255},
+		text_color = {224, 226, 234, 255},
 		title_position = {40, 40},
 		text_position = {40, 90},
 		title_font_size = 24,
 		text_font_size = 20,
 		text_spacing = 28,
 		text_margin = 96,
+		text_alignment = .CENTER,
 	}
 }
 

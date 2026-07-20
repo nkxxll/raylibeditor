@@ -9,7 +9,9 @@ import "core:strings"
 current_slide : int = 0
 
 Render_Text_Item :: struct {
-	text: string
+	text:      string,
+	style:     restate.Style,
+	overrides: restate.Text_Style_Overrides,
 }
 
 Render_Slide_Item :: union {
@@ -25,6 +27,26 @@ to_ray_color :: proc(color: restate.Color) -> rl.Color {
 	return rl.Color{color.r, color.g, color.b, color.a}
 }
 
+merge_text_style :: proc(global, local: restate.Style, overrides: restate.Text_Style_Overrides) -> restate.Style {
+	style := global
+	if overrides.text_color {
+		style.text_color = local.text_color
+	}
+	if overrides.text_font_size {
+		style.text_font_size = local.text_font_size
+	}
+	if overrides.text_spacing {
+		style.text_spacing = local.text_spacing
+	}
+	if overrides.text_margin {
+		style.text_margin = local.text_margin
+	}
+	if overrides.text_alignment {
+		style.text_alignment = local.text_alignment
+	}
+	return style
+}
+
 make_render_text_item :: proc(text: string, allocator := context.temp_allocator) -> Render_Slide_Item {
 	return Render_Slide_Item(Render_Text_Item {
 		text = strings.clone(text, allocator),
@@ -34,7 +56,11 @@ make_render_text_item :: proc(text: string, allocator := context.temp_allocator)
 make_render_slide_item :: proc(item: restate.Slide_Item, allocator := context.temp_allocator) -> Render_Slide_Item {
 	switch value in item {
 	case restate.Text_Item:
-		return make_render_text_item(value.text, allocator)
+		return Render_Slide_Item(Render_Text_Item {
+			text = strings.clone(value.text, allocator),
+			style = value.style,
+			overrides = value.overrides,
+		})
 	}
 
 	panic("unknown slide item type")
@@ -56,16 +82,24 @@ measure_text :: proc(text: string, font_size: i32) -> i32 {
 	return rl.MeasureText(strings.clone_to_cstring(text, context.temp_allocator), font_size)
 }
 
-draw_text_boxed :: proc(text: string, bounds: rl.Rectangle, font_size: i32, spacing: i32, color: rl.Color, allocator := context.temp_allocator) {
+draw_text_boxed :: proc(text: string, bounds: rl.Rectangle, font_size: i32, spacing: i32, alignment: restate.Text_Alignment, color: rl.Color, allocator := context.temp_allocator) -> i32 {
 	max_width := i32(bounds.width)
 	line_start := 0
 	line_end := 0
-	y := i32(bounds.y)
+	start_y := i32(bounds.y)
+	y := start_y
 	for line_end <= len(text) {
 		if line_end == len(text) || text[line_end] == '\n' {
 			line := text[line_start:line_end]
 			c_line := strings.clone_to_cstring(line, context.temp_allocator)
-			rl.DrawText(c_line, i32(bounds.x) + (max_width - rl.MeasureText(c_line, font_size)) / 2, y, font_size, color)
+			line_width := rl.MeasureText(c_line, font_size)
+			x := i32(bounds.x)
+			switch alignment {
+			case .LEFT:
+			case .CENTER: x += (max_width - line_width) / 2
+			case .RIGHT: x += max_width - line_width
+			}
+			rl.DrawText(c_line, x, y, font_size, color)
 			y += spacing
 			line_start = line_end + 1
 			line_end = line_start
@@ -80,7 +114,14 @@ draw_text_boxed :: proc(text: string, bounds: rl.Rectangle, font_size: i32, spac
 		if line_end != line_start && measure_text(candidate, font_size) > max_width {
 			line := text[line_start:line_end]
 			c_line := strings.clone_to_cstring(line, context.temp_allocator)
-			rl.DrawText(c_line, i32(bounds.x) + (max_width - rl.MeasureText(c_line, font_size)) / 2, y, font_size, color)
+			line_width := rl.MeasureText(c_line, font_size)
+			x := i32(bounds.x)
+			switch alignment {
+			case .LEFT:
+			case .CENTER: x += (max_width - line_width) / 2
+			case .RIGHT: x += max_width - line_width
+			}
+			rl.DrawText(c_line, x, y, font_size, color)
 			y += spacing
 			line_start = line_end + 1
 		}
@@ -92,6 +133,7 @@ draw_text_boxed :: proc(text: string, bounds: rl.Rectangle, font_size: i32, spac
 			break
 		}
 	}
+	return y - start_y
 }
 
 init :: proc(width: i32, height: i32, render_state: ^restate.Shared_Render_State) -> restate.Rendering_State {
@@ -148,8 +190,17 @@ update :: proc(state: ^restate.Rendering_State) {
 		for item in slide.items {
 			switch value in item {
 			case Render_Text_Item:
-				draw_text_boxed(value.text, text_bounds, style.text_font_size, style.text_spacing, to_ray_color(style.text_color))
-				text_bounds.y += f32(style.text_spacing)
+				item_style := merge_text_style(style, value.style, value.overrides)
+				item_bounds := text_bounds
+				item_bounds.x = f32(item_style.text_margin)
+				item_bounds.width = f32(state.width - item_style.text_margin * 2)
+				item_bounds.height = f32(state.height) - item_bounds.y - f32(item_style.text_margin)
+				used_height := draw_text_boxed(value.text, item_bounds, item_style.text_font_size, item_style.text_spacing, item_style.text_alignment, to_ray_color(item_style.text_color))
+				advance := f32(used_height)
+				if advance < f32(item_style.text_spacing) {
+					advance = f32(item_style.text_spacing)
+				}
+				text_bounds.y += advance
 			}
 		}
 	}

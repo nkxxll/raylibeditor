@@ -126,11 +126,9 @@ main :: proc() {
 		mem.arena_free_all(&state_arena)
 		delete(state_data)
 	}
-	state_allocator := mem.arena_allocator(&state_arena)
-
 	shared_render_state := restate.Shared_Render_State {
-		allocator = state_allocator,
-		slides = make([dynamic]restate.Slide, 0, 16, state_allocator),
+		arena = &state_arena,
+		slides = make([dynamic]restate.Slide, 0, 16, mem.arena_allocator(&state_arena)),
 		style = restate.default_style(),
 	}
 

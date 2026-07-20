@@ -41,7 +41,36 @@ handle_text_slide_item :: proc(L: ^lua.State, absolute_item_index: i32, allocato
 	text := lua.L_checkstring(L, -1)
 	lua.pop(L, 1)
 
-	return restate.Text_Item { text = strings.clone(string(text), allocator) }
+	style := restate.default_style()
+	overrides: restate.Text_Style_Overrides
+	lua.getfield(L, absolute_item_index, "style")
+	if !lua.isnil(L, -1) {
+		style_index := lua.absindex(L, -1)
+		style = handle_style(L, style_index)
+
+		lua.getfield(L, style_index, "text_color")
+		overrides.text_color = !lua.isnil(L, -1)
+		lua.pop(L, 1)
+		lua.getfield(L, style_index, "text_font_size")
+		overrides.text_font_size = !lua.isnil(L, -1)
+		lua.pop(L, 1)
+		lua.getfield(L, style_index, "text_spacing")
+		overrides.text_spacing = !lua.isnil(L, -1)
+		lua.pop(L, 1)
+		lua.getfield(L, style_index, "text_margin")
+		overrides.text_margin = !lua.isnil(L, -1)
+		lua.pop(L, 1)
+		lua.getfield(L, style_index, "text_alignment")
+		overrides.text_alignment = !lua.isnil(L, -1)
+		lua.pop(L, 1)
+	}
+	lua.pop(L, 1)
+
+	return restate.Text_Item {
+		text = strings.clone(string(text), allocator),
+		style = style,
+		overrides = overrides,
+	}
 }
 
 // this reads the type and dispatches to the specific item handlers	
@@ -171,6 +200,18 @@ handle_style :: proc(L: ^lua.State, index: i32) -> restate.Style {
 	lua.getfield(L, style_index, "text_position")
 	style.text_position = handle_point(L, -1, style.text_position)
 	lua.pop(L, 1)
+	lua.getfield(L, style_index, "text_alignment")
+	if !lua.isnil(L, -1) {
+		alignment := lua.L_checkstring(L, -1)
+		switch alignment {
+		case "left": style.text_alignment = .LEFT
+		case "center": style.text_alignment = .CENTER
+		case "right": style.text_alignment = .RIGHT
+		case:
+			lua.L_error(L, "style.text_alignment must be left, center, or right")
+		}
+	}
+	lua.pop(L, 1)
 
 	for key in 0..<4 {
 		field: cstring
@@ -227,6 +268,8 @@ clone_slide_item :: proc(item: restate.Slide_Item, allocator: mem.Allocator) -> 
 	case restate.Text_Item:
 		return restate.Slide_Item(restate.Text_Item {
 			text = strings.clone(value.text, allocator),
+			style = value.style,
+			overrides = value.overrides,
 		})
 	}
 	panic("unknown slide item type")
@@ -305,13 +348,14 @@ update_state :: proc "c" (L: ^lua.State) -> i32 {
 
 	// The Lua table has been fully parsed and validated. Clone the temporary
 	// document before publishing it, then swap all requested fields together.
-	allocator := user_data.render_state.allocator
+	allocator := mem.arena_allocator(user_data.render_state.arena)
 	slides: [dynamic]restate.Slide
-	if parsed.has_index {
-		slides = clone_slides(parsed.slides[:], allocator)
-	}
 	sync.mutex_lock(&user_data.render_state.mutex)
 	if parsed.has_index {
+		// Published slides live in this arena. The mutex keeps the renderer
+		// from reading the old arena contents while they are discarded.
+		mem.arena_free_all(user_data.render_state.arena)
+		slides = clone_slides(parsed.slides[:], allocator)
 		user_data.render_state.slides = slides
 	}
 	if parsed.has_style {
