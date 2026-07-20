@@ -14,7 +14,8 @@ import "reray"
 import "core:thread"
 
 Event_Loop_Context :: struct {
-	L: ^lua.State
+	L: ^lua.State,
+	slide_state: ^restate.User_Data_State
 }
 
 start_event_loop :: proc(data: rawptr) {
@@ -43,9 +44,11 @@ start_event_loop :: proc(data: rawptr) {
 		for {
 			fmt.println("event loop start")
 			// this constantly reads this is not good we need poll here
+			free_all(event_loop_context.slide_state.render_state.allocator)
 			n := posix.read(posix.FD(fd), raw_data(event_buf[:]), EVENT_BUF_SIZE)
 			if n > 0 {
 				fmt.println("script.lua changed; re-evaluating")
+				
 				relua.eval_script(event_loop_context.L, "script.lua")
 			} else {
 				fmt.println("inotify read error")
@@ -119,8 +122,11 @@ main :: proc() {
 	// Keep the arena itself alive for as long as anything allocated from it exists.
 	state_arena: mem.Arena
 	state_data := make([]byte, DEFAULT_ARENA_SIZE)
-	defer delete(state_data)
 	mem.arena_init(&state_arena, state_data)
+	defer {
+		mem.arena_free_all(&state_arena)
+		delete(state_data)
+	}
 	state_allocator := mem.arena_allocator(&state_arena)
 
 	shared_render_state := restate.Shared_Render_State {
@@ -138,7 +144,8 @@ main :: proc() {
 	defer lua.close(L)
 
 	event_loop_context := Event_Loop_Context { 
-		L = L
+		L = L,
+		slide_state = &user_data_state
 	}
 
 	_ = thread.create_and_start_with_data(&event_loop_context, start_event_loop)
